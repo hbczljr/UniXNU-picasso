@@ -399,3 +399,142 @@
 +  seed.count=seed.resident=0;
 +  return true;
 +}
+--- a/NativeRamBlock.cpp
++++ b/NativeRamBlock.cpp
+@@ -132,7 +132,7 @@
+     return true;
+   }
+   void attachStore() {
+-    if (!gate) return;
++    if (!gate) { IOLog("PICASSO_DATASTORE attach refused reason=no-gate\n"); return; }
+     IOLockLock(gate);
+     if (storeAttached || stopping) { IOLockUnlock(gate); return; }
+     storeAttached = true;
+@@ -231,6 +231,9 @@
+         IOLog("PICASSO_DATASTORE ready=%u direct=%u volatile=%u failed=%u gpt_after=%u bytes=%llu\n",
+               direct || volatileFallback,direct,volatileFallback,directFailed,native_data_persist_gpt_after,pages * 4096);
+       }
++    } else {
++      IOLog("PICASSO_DATASTORE attach skipped mode=%u sparse=%u isBig=%u\n",
++            mode,sparse.pages!=nullptr?1:0,isBig?1:0);
+     }
+     IOLockUnlock(gate);
+   }
+@@ -244,6 +247,7 @@
+   }
+   static void startPersistent(void *argument, wait_result_t) {
+     NativeRamBlock *self=static_cast<NativeRamBlock *>(argument);
++    IOLog("PICASSO_DATASTORE worker started\n");
+     // Publish only AFTER overlay attachment; APFS must never cache seed-only
+     // metadata and then have its underlying blocks replaced by resumed Data.
+     // Root authentication/owner setup precedes selectVolumeSeed. Do not open
+@@ -254,8 +258,10 @@
+       if(__atomic_load_n(&native_ram_block_attach_requested,__ATOMIC_ACQUIRE))break;
+       IOSleep(100);
+     }
++    IOLog("PICASSO_DATASTORE worker attach requested\n");
+     unsigned waited=0;
+     while(waited<120 && (!&native_ufs_store_ready || !native_ufs_store_ready())) {IOSleep(500);++waited;}
++    IOLog("PICASSO_DATASTORE worker store-ready waited=%u ready=%u\n",waited,(&native_ufs_store_ready && native_ufs_store_ready())?1:0);
+     self->attachStore();
+     IOLockLock(self->gate);
+     bool publish=(self->direct || self->volatileFallback) && !self->directFailed && !self->stopping;
+@@ -304,12 +310,12 @@
+ 
+ bool NativeRamBlock::start(IOService *provider)
+ {
+-  if (!IOBlockStorageDevice::start(provider)) return false;
++  if (!IOBlockStorageDevice::start(provider)) { IOLog("PICASSO_DATASTORE start refused reason=super-start\n"); return false; }
+   IORegistryEntry *map = IORegistryEntry::fromPath("/chosen/memory-map", gIODTPlane);
+-  if (!map) return false;
++  if (!map) { IOLog("PICASSO_DATASTORE start refused reason=no-memory-map\n"); return false; }
+   OSData *packed = OSDynamicCast(OSData, map->getProperty("PackedRAMDisk"));
+   OSData *range = OSDynamicCast(OSData, map->getProperty("RAMDisk"));
+-  if(packed && range){map->release();return false;}
++  if(packed && range){map->release(); IOLog("PICASSO_DATASTORE start refused reason=both-ramdisks\n"); return false;}
+   if(packed)range=packed;
+   bool packedInput=packed!=nullptr;
+   uint64_t physical = 0, bytes = 0;
+@@ -318,27 +324,29 @@
+     memcpy(&bytes, static_cast<const uint8_t *>(range->getBytesNoCopy()) + 8, 8);
+   }
+   map->release();
++  IOLog("PICASSO_DATASTORE start range packed=%u bytes=%llu physical=%llx\n",packedInput?1:0,bytes,physical);
+   // Boot memory belongs to the loader/kernel; never allocate or free it here.
+   if (!bytes || bytes > 0x80000000 || (physical & 4095) || (!packedInput && (bytes & 4095)) ||
+-      physical < gPhysBase || bytes > gPhysSize || physical - gPhysBase > gPhysSize - bytes) return false;
++      physical < gPhysBase || bytes > gPhysSize || physical - gPhysBase > gPhysSize - bytes) { IOLog("PICASSO_DATASTORE start refused reason=bad-range packed=%u bytes=%llu physical=%llx\n",packedInput?1:0,bytes,physical); return false; }
+   memory = reinterpret_cast<uint8_t *>(ml_static_ptovirt(physical));
+-  if (!memory || !(gate = IOLockAlloc())) return false;
++  if (!memory || !(gate = IOLockAlloc())) { IOLog("PICASSO_DATASTORE start refused reason=no-memory-or-lock\n"); return false; }
+   uint64_t logical=bytes;
+   if(packedInput){
+-    if(!ramPackedLayout(memory,bytes,&logical))return false;
++    if(!ramPackedLayout(memory,bytes,&logical)) { IOLog("PICASSO_DATASTORE start refused reason=packed-layout bytes=%llu\n",bytes); return false; }
++    IOLog("PICASSO_DATASTORE start packed logical=%llu\n",logical);
+     struct ImportOps {uint8_t *allocate(){return static_cast<uint8_t *>(IOMallocZero(4096));}} ops;
+     if(logical>0x80000000ULL){
+       uint64_t nonzero=0;
+-      if(!seedCountNonzero(memory,bytes,&nonzero))return false;
++      if(!seedCountNonzero(memory,bytes,&nonzero)) { IOLog("PICASSO_DATASTORE start refused reason=count-nonzero\n"); return false; }
+       big.bytes=logical;big.capacity=nonzero;
+       big.index=static_cast<uint64_t *>(IOMallocZero((nonzero?nonzero:1)*sizeof(uint64_t)));
+       big.page=static_cast<uint8_t **>(IOMallocZero((nonzero?nonzero:1)*sizeof(uint8_t *)));
+-      if(!big.index||!big.page||!seedImportSparse(big,memory,bytes,ops))return false;
++      if(!big.index||!big.page||!seedImportSparse(big,memory,bytes,ops)) { IOLog("PICASSO_DATASTORE start refused reason=seed-import nonzero=%llu\n",nonzero); return false; }
+       isBig=true;sparse.bytes=logical;
+     }else{
+       sparse.bytes=logical;
+       sparse.pages=static_cast<uint8_t **>(IOMallocZero((logical/4096)*sizeof(uint8_t *)));
+-      if(!ramSparseImport(sparse,memory,bytes,ops))return false;
++      if(!ramSparseImport(sparse,memory,bytes,ops)) { IOLog("PICASSO_DATASTORE start refused reason=sparse-import\n"); return false; }
+     }
+   }
+   capacity = logical / 512;
+@@ -365,6 +373,7 @@
+     if(kernel_thread_start(startPersistent,this,&worker)!=KERN_SUCCESS){release();return false;}
+     thread_deallocate(worker);
+   } else { online=true;native_ram_block_ready=1;registerService(); }
++  IOLog("PICASSO_DATASTORE start ok isBig=%u logical=%llu sparse=%u resident=%llu\n",isBig?1:0,logical,sparse.pages!=nullptr?1:0,native_ram_block_resident_bytes);
+   return true;
+ }
+ 
+@@ -493,13 +502,16 @@
+   if (!uuid || strlen(uuid) != 36 || !device || !path || size < 6) return 0;
+   *device = NODEV;
+   path[0] = 0;
++  IOLog("PICASSO_DATASTORE select-volume-seed uuid=%s\n",uuid);
+   // The persistence worker must finish before UUID matching. Its blank scan is
+   // bounded by the physical window and may outlast the root volume mount.
+   if (&native_ufs_store_mode && native_ufs_store_mode()==2) {
+     __atomic_store_n(&native_ram_block_attach_requested,1U,__ATOMIC_RELEASE);
+     unsigned waited=0;
+     while(!__atomic_load_n(&native_ram_block_ready,__ATOMIC_ACQUIRE) && waited++<2400)IOSleep(100);
+-    if(__atomic_load_n(&native_ram_block_ready,__ATOMIC_ACQUIRE)!=1)return 0;
++    unsigned ready=__atomic_load_n(&native_ram_block_ready,__ATOMIC_ACQUIRE);
++    IOLog("PICASSO_DATASTORE select-volume-seed worker waited=%u ready=%u\n",waited,ready);
++    if(ready!=1)return 0;
+   }
+   OSDictionary *matching = IOService::serviceMatching("IOMedia");
+   OSDictionary *properties = OSDictionary::withCapacity(1);
+@@ -546,7 +558,7 @@
+     }
+   }
+   iterator->release();
+-  if (!selected || matches != 1) return 0;
++  if (!selected || matches != 1) { IOLog("PICASSO_DATASTORE select-volume-seed no-match matches=%u selected=%u\n",matches,selected?1:0); return 0; }
+   *device = candidate;
+   strlcpy(path, candidatePath, size);
+   if(seedBase)*seedBase=base;
+@@ -581,7 +593,10 @@
+ 
+ extern "C" int native_ram_block_volume_seed(const char *uuid,dev_t *device,char *path,size_t size,
+     uint64_t *base,uint64_t *bytes,uint8_t digest[32]) {
++  IOLog("PICASSO_DATASTORE volume-seed uuid=%s\n",uuid?uuid:"(null)");
+   if(!base || !bytes || !digest)return 0;
+   *base=0;*bytes=0;memset(digest,0,32);
+-  return selectVolumeSeed(uuid,device,path,size,base,bytes,digest);
++  int result=selectVolumeSeed(uuid,device,path,size,base,bytes,digest);
++  IOLog("PICASSO_DATASTORE volume-seed result=%d path=%s\n",result,path?path:"");
++  return result;
+ }

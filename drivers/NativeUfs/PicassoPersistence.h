@@ -29,11 +29,16 @@ static bool picassoRecordWindowOpen() {
     uint64_t partition=gStoreGeometry.last-gStoreGeometry.first+1;
     if(storeMode()!=2 || logMode()!=0 || !gStoreGeometry.valid ||
        reserveBlocks()<kLogReserveBlocks+kExportBlocks || reserveBlocks()>=partition ||
-       partition-reserveBlocks()<(gStoreGeometry.imageBytes+4095)/4096+1024)return false;
+       partition-reserveBlocks()<(gStoreGeometry.imageBytes+4095)/4096+1024) {
+        IOLog("PICASSO_DATA_INIT record-window refused mode=%u logMode=%u valid=%u reserve=%llu partition=%llu imageBlocks=%llu\n",
+              storeMode(),logMode(),gStoreGeometry.valid?1:0,reserveBlocks(),partition,(gStoreGeometry.imageBytes+4095)/4096);
+        return false;
+    }
     uint64_t first=gStoreGeometry.last+1-kLogReserveBlocks-kExportBlocks;
     IOLockLock(gHost.lock);
     gPicassoRecordWindowOpened=hostLogOpen(first,kLogReserveBlocks+kExportBlocks);
     IOLockUnlock(gHost.lock);
+    IOLog("PICASSO_DATA_INIT record-window open=%u first=%llu\n",gPicassoRecordWindowOpened?1:0,first);
     return gPicassoRecordWindowOpened;
 }
 picasso_data_init::Journal gPicassoDataInit;
@@ -74,6 +79,8 @@ static void picassoLogThread(void *,wait_result_t) {
 // CRC checks still precede initialization. No writes to the root or GPT.
 extern "C" int picasso_data_init_begin(uint64_t pages,const uint8_t seed[32]) {
     uint32_t request=0;PE_parse_boot_argn("picasso-data-replace-20g",&request,sizeof(request));
+    IOLog("PICASSO_DATA_INIT enter seed=%u pages=%llu regionBlocks=%llu regionFirst=%llu first=%llu last=%llu imageBytes=%llu reserve=%llu headerCrc=%x entriesCrc=%x replace=%u\n",
+          seed?1:0,pages,gStoreRegionBlocks,gStoreRegionFirst,gStoreGeometry.first,gStoreGeometry.last,gStoreGeometry.imageBytes,reserveBlocks(),gStoreGeometry.headerCrc,gStoreGeometry.entriesCrc,request);
     if(!seed || pages!=5242880 || gStoreRegionBlocks!=5243041 || gStoreRegionFirst!=25439066 ||
        gStoreGeometry.first!=2883584 || gStoreGeometry.last!=30944250 ||
        gStoreGeometry.imageBytes!=8380219392ULL || reserveBlocks()!=262144 ||

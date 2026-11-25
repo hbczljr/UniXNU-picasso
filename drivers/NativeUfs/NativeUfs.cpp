@@ -1488,18 +1488,26 @@ extern "C" int native_ufs_log_sync (void)
 // Re-read the GPT header and entry array and compare their CRCs with what was recorded at root start. 0 = unchanged.
 extern "C" unsigned native_ufs_store_gpt_check (void)
 {
-  if (!gStoreGeometry.valid || !gHost.ready) return 1;
+  if (!gStoreGeometry.valid || !gHost.ready) { IOLog("PICASSO_DATA_INIT gpt-check=1 valid=%u ready=%u\n",gStoreGeometry.valid?1:0,gHost.ready?1:0); return 1; }
   uint8_t block[4096];
-  if (hostRead4k (0, 1, 1, block) != kIOReturnSuccess) return 2;
+  if (hostRead4k (0, 1, 1, block) != kIOReturnSuccess) { IOLog("PICASSO_DATA_INIT gpt-check=2 header read failed\n"); return 2; }
   uint32_t headerBytes = le32 (block + 12);
   if (headerBytes < 92 || headerBytes > 4096 || rootCrc32 (block, headerBytes, true) != le32 (block + 16) ||
-      le32 (block + 16) != gStoreGeometry.headerCrc) return 3;
+      le32 (block + 16) != gStoreGeometry.headerCrc) {
+    uint32_t computed = (headerBytes >= 92 && headerBytes <= 4096) ? rootCrc32 (block, headerBytes, true) : 0;
+    IOLog("PICASSO_DATA_INIT gpt-check=3 headerBytes=%u computedCrc=%x storedCrc=%x expectedCrc=%x\n",headerBytes,computed,le32(block+16),gStoreGeometry.headerCrc);
+    return 3;
+  }
   uint32_t blocks = (gStoreGeometry.entryCount * 128 + 4095) / 4096;
-  if (blocks > 4) return 4;
+  if (blocks > 4) { IOLog("PICASSO_DATA_INIT gpt-check=4 entryBlocks=%u count=%u\n",blocks,gStoreGeometry.entryCount); return 4; }
   uint8_t *entries=static_cast<uint8_t *>(IOMalloc(4096 * 4));
-  if (!entries) return 4;
+  if (!entries) { IOLog("PICASSO_DATA_INIT gpt-check=4 alloc failed\n"); return 4; }
   unsigned result=hostRead4k(0,gStoreGeometry.entriesLba,blocks,entries)!=kIOReturnSuccess?4:
       rootCrc32(entries,gStoreGeometry.entryCount*128)==gStoreGeometry.entriesCrc?0:5;
+  if (result) {
+    uint32_t computed = result==5 ? rootCrc32(entries,gStoreGeometry.entryCount*128) : 0;
+    IOLog("PICASSO_DATA_INIT gpt-check=%u computedEntriesCrc=%x expectedCrc=%x entriesLba=%llu count=%u\n",result,computed,gStoreGeometry.entriesCrc,gStoreGeometry.entriesLba,gStoreGeometry.entryCount);
+  }
   IOFree(entries,4096 * 4);
   return result;
 }
