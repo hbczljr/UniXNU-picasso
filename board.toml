@@ -287,6 +287,8 @@ kernel_args = [
   "offline-legacy-validate=1",
   "offline-legacy-transfer=1",
   "offline-legacy-cpu-present=1",
+  # Display/GPU event logging (registration, client entry, swap, frame nonblack counts); logging only.
+  "gldiag=1",
   # Offer frames to the GPU client; keep the CPU path when no client accepts.
   "sheng-fb-gpu=1",
   # Rebuild application registration after the staged Applications view mounts.
