@@ -35,7 +35,8 @@
 @@ -8216,6 +8216,11 @@
  	int data_error = native_owner_data_prepare(p, (user_addr_t)scratch_addr);
  	boot_progress_stage("Data mount returned");
- 	if (data_error) panic("offline scratch Data mount failed: %d", data_error);
+-	if (data_error) panic("offline scratch Data mount failed: %d", data_error);
++	if (data_error) panic("offline scratch Data mount failed: %d stage=%d", data_error, native_owner_data_stage);
 +	{
 +		/* Retry swap creation now that /private/var is writable. */
 +		extern void vm_swap_retry_create(void);
