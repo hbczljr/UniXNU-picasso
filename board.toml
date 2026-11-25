@@ -305,9 +305,12 @@ kernel_args = [
   "picasso-persist-records=1",
   # Software refresh notifications only; panel timing remains firmware-owned.
   "sheng-vsync=60",
-  # Virtual input: after HID and two frames are ready, wake at 5 s and swipe at 8 s.
-  # Repeat at 60 s intervals, up to eight attempts; failure releases the contact.
-  "offline-hid-input=1",
+  # Virtual input auto-swipe omitted for now: DarwinBoot caps the kernel
+  # command line at 1000 bytes and gldiag=1 pushed it to 1006. The swipe
+  # (wake at 5 s, swipe at 8 s, repeat every 60 s up to eight attempts) is
+  # test-only convenience; the lock screen still renders without it, and
+  # physical touch (sheng-touch-hid/sheng-touch) is unaffected. Re-add it
+  # when the budget allows.
   "sheng-touch-hid=1",
   # Download the pinned firmware and deliver physical contacts after HID is ready.
   "sheng-touch=4",

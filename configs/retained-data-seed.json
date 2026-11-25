@@ -21,7 +21,7 @@
   "recipe_compatibility": {
     "schema": "picasso-seed-recipe-compatibility-v1",
     "original_recipe_sha256": "b5fc7d559c3ab0dd1c7fee9fe46674b50457772c63321f01ace72498de5a2832",
-    "compatible_recipe_sha256": "c0c41257cf54eda8872db7a5c76b39a79d5923b148898dd5f01d27623ff3efd1",
-    "reason": "Payload capacity is independent of the unchanged packed Data and Setup seed; gldiag=1 only adds display event logging to kernel_args and does not change seed contents."
+    "compatible_recipe_sha256": "cb7bc975d831e58a42f070d04f5edc734d954c333f61821f0bef830df05fc654",
+    "reason": "Payload capacity is independent of the unchanged packed Data and Setup seed; gldiag=1 only adds display event logging to kernel_args and does not change seed contents; offline-hid-input=1 (test-only auto-swipe) omitted to stay within the 1000-byte kernel command line budget."
   }
 }
