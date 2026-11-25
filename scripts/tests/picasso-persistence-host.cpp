@@ -108,7 +108,7 @@ static unsigned run() {
 }
 namespace InitTest {
 static Medium medium;
-static struct {uint64_t first,last,imageBytes;uint32_t headerCrc,entriesCrc;} gStoreGeometry={2883584,30944250,8380219392ULL,0x3c17a352,0xd82988c2};
+static struct {uint64_t first,last,imageBytes;uint32_t headerCrc,entriesCrc;} gStoreGeometry={2883584,30944250,8380219392ULL,0xfe827362,0xfd3cb4c4};
 static uint64_t gStoreRegionFirst=25439066,gStoreRegionBlocks=5243041;
 static constexpr uint64_t kLogReserveBlocks=8192,kExportBlocks=65536;
 static picasso_data_init::Journal gPicassoDataInit;

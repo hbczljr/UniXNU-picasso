@@ -12,7 +12,8 @@ authenticated root must match before replacement is allowed.
 
 On the 128 GiB device used here the userdata partition is 2883584..30944250
 and the Data overlay moves to 25439066..30682106 (same 20 GiB + 644 KiB size);
-the GPT CRCs for that device replace the build164 values below.
+the GPT CRCs for that device are fe827362/fd3cb4c4 (disk GUID
+9bba2340af7ad7da82610e5ba4f42b07, dumped 2026-11-25).
 
 | Region | First LBA | Last LBA | Size |
 | --- | ---: | ---: | ---: |
