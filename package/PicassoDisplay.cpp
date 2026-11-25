@@ -329,6 +329,10 @@ static void publishAcceleratorStub(void) {
     bool initialized = accel && accel->init();
     bool attached = initialized && accel->attach(provider);
     bool started = attached && accel->start(provider);
+    // Round 7: published=0 with no refusal log means the chain above failed at
+    // allocate/init/attach/start; log each step so the next boot shows which one.
+    IOLog("PICASSO_ACCEL steps requested=%u metal=%u loaded=%x class_present=%u provider=%u handle=%u status=%x accel=%u initialized=%u attached=%u started=%u\n",
+        requested, metal, loaded, present, provider != nullptr, handle != nullptr, status, accel != nullptr, initialized, attached, started);
     if (!started && attached) accel->detach(provider);
     // The registry keeps the published service alive; drop the allocation reference either way.
     OSSafeReleaseNULL(accel);

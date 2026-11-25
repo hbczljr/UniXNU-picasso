@@ -1244,6 +1244,18 @@ static void monitor(void *arg, wait_result_t result) {
     // to a time before userland starts flooding the CDC console.
     if(native_novatek_touch_boot_report)native_novatek_touch_boot_report(now);
     if(boot_process_snapshot)boot_process_snapshot();
+    // Round 7: the probe rows are otherwise only rendered to the display, which
+    // stays on the bootloader splash while no frame is submitted. Mirror them to
+    // the USB console every 5th pass so the log shows when backboardd/SpringBoard
+    // start, their PIDs/thread states, and whether they crash-loop.
+    {
+      static unsigned last_proc_log_pass;
+      if(&boot_process_rows && boot_process_passes != last_proc_log_pass && (boot_process_passes % 5) == 0) {
+        last_proc_log_pass = boot_process_passes;
+        for(unsigned i = 0; i < 10; ++i)
+          printf("PICASSO_PROC pass=%u %s\n", boot_process_passes, boot_process_rows[i]);
+      }
+    }
     if(boot_log_tick)boot_log_tick(now);
     if(sheng_cpufreq_poll)sheng_cpufreq_poll();
     if(boot_ui_trace_snapshot)boot_ui_trace_snapshot(now);
