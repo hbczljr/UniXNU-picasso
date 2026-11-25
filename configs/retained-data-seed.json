@@ -5,7 +5,7 @@
   "asset": "picasso-data-seed-72443f51.zip",
   "bytes": 1177534,
   "sha256": "f61e92ba762e481d84abdcf4d8f391b08d2e4b03f8bbeab40eb92df923b99eec",
-  "recipe_sha256": "b5fc7d559c3ab0dd1c7fee9fe46674b50457772c63321f01ace72498de5a2832",
+  "recipe_sha256": "c0c41257cf54eda8872db7a5c76b39a79d5923b148898dd5f01d27623ff3efd1",
   "volume_uuid": "72443F51-21DE-49BF-AA5A-BDBFEEA830ED",
   "original_producer": {
     "schema": "picasso-ios16-linux-inputs-v1",
