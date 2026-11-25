@@ -153,6 +153,14 @@ static unsigned run(){
         assert(!picasso_data_init_begin(5242880,seed));medium.fail=0;
         int state=picasso_data_init_begin(5242880,seed);assert(state==0 || state==1);++cases;
     }
+    // Unrecognized bytes in the journal window (e.g. leftover data from a
+    // previous OS): refused without authorization, treated as fresh with it.
+    for(bool auth:{false,true}) {
+        medium=Medium{};medium.limit=30944251;medium.disk[30870533][0]=0xa5;medium.disk[30870535][4095]=0x5a;
+        authorized=auth;int state=picasso_data_init_begin(5242880,seed);assert(state==(auth?1:0));
+        if(!auth)assert(!medium.writes);++cases;
+    }
+    authorized=true;
     for(unsigned slot=0;slot<2;++slot) {
         medium=completed;medium.disk[15256581+slot*2][0]^=1;
         assert(picasso_data_init_begin(5242880,seed)==2 && picasso_data_init_finish());++cases;

@@ -21,6 +21,18 @@ struct Journal {
             if(!record.save(ops,payload,payloadBytes,scratch))return 0;
             pending=true;return 1;
         }
+        if(state==0) {
+            // Both slots were read but hold no valid record and are not
+            // both empty: unrecognized bytes (e.g. leftover data from a
+            // previous OS), not a journal. With explicit replacement
+            // authorization, treat the window as fresh and overwrite it
+            // with a pending record. Without authorization, or when the
+            // reads themselves failed, still refuse (save requires ready).
+            if(!authorized)return 0;
+            picasso_record::put32(payload+identityBytes,1);
+            if(!record.save(ops,payload,payloadBytes,scratch))return 0;
+            pending=true;return 1;
+        }
         if(state!=1 || record.length!=payloadBytes || memcmp(saved,identity,identityBytes))return 0;
         uint32_t phase=picasso_record::u32(saved+identityBytes);
         if(phase==2){complete=true;return 2;}

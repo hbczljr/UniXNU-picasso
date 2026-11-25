@@ -24,6 +24,8 @@ struct Record {
     uint32_t blocks() const {return 1+(capacity+block-1)/block;}
     // Caller supplies capacity bytes of scratch and output; calls are serialized.
     // 1 restored, 2 unused, 0 IO/corruption. A surviving valid slot wins a torn peer.
+    // On corruption after successful reads, ready stays true so an explicitly
+    // authorized caller may overwrite the window; on I/O failure ready is false.
     template<class Ops> int open(Ops &ops,uint64_t base,uint32_t type,uint32_t cap,uint8_t *scratch,uint8_t *out) {
         first=base;kind=type;capacity=cap;generation=0;length=0;slot=-1;ready=false;failed=false;
         if(!cap || cap%block || !scratch || !out)return 0;
@@ -41,7 +43,13 @@ struct Record {
                 generation=u64(hdr+16);length=u32(hdr+28);slot=s;memcpy(out,scratch,length);
             }
         }
-        if(slot<0 && !(empty[0]&&empty[1]))return 0;
+        if(slot<0 && !(empty[0]&&empty[1])) {
+            // Both slots were read successfully but hold no valid record:
+            // unrecognized bytes, not a journal. Keep the transport usable
+            // so an authorized caller may overwrite the window; I/O
+            // failures above still return 0 with ready=false.
+            ready=true;return 0;
+        }
         ready=true;return slot<0?2:1;
     }
     template<class Ops> bool save(Ops &ops,const uint8_t *data,uint32_t bytes,uint8_t *scratch) {

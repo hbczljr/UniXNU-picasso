@@ -50,8 +50,11 @@ Completion refreshes both slots on a later resume as well.
 An interrupted pending reset can restart because Data has never been published.
 A complete record allows **resume only**; a changed seed, damaged Data header,
 foreign journal or I/O/GPT failure is refused. A torn first journal with no
-valid slot is also refused; it is never inferred to be empty. Such errors need
-inspection, not repeated formatting. NVRAM/console startup shares the already
+valid slot is refused unless replacement is explicitly authorized; with
+authorization the unrecognized window is treated as fresh and overwritten,
+because no valid journal exists to protect. A valid journal with a different
+identity, and a completed journal, still refuse even when authorized. Such
+errors need inspection, not repeated formatting. NVRAM/console startup shares the already
 opened record transport window, and still requires persistent Data state 2/3.
 Auxiliary storage keeps its independent blank/owner checks.
 
