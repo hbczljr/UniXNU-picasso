@@ -108,8 +108,8 @@ static unsigned run() {
 }
 namespace InitTest {
 static Medium medium;
-static struct {uint64_t first,last,imageBytes;uint32_t headerCrc,entriesCrc;} gStoreGeometry={2883584,15330298,8380219392ULL,0x3c17a352,0xd82988c2};
-static uint64_t gStoreRegionFirst=9825114,gStoreRegionBlocks=5243041;
+static struct {uint64_t first,last,imageBytes;uint32_t headerCrc,entriesCrc;} gStoreGeometry={2883584,30944250,8380219392ULL,0x3c17a352,0xd82988c2};
+static uint64_t gStoreRegionFirst=25439066,gStoreRegionBlocks=5243041;
 static constexpr uint64_t kLogReserveBlocks=8192,kExportBlocks=65536;
 static picasso_data_init::Journal gPicassoDataInit;
 static uint8_t gPicassoInitScratch[4096],gPicassoInitSaved[4096];
@@ -127,7 +127,7 @@ struct PicassoRecordOps {
 #include "init-begin.inc"
 #include "init-finish.inc"
 static unsigned run(){
-    unsigned cases=0;uint8_t seed[32]={0x19};medium.limit=15330299;
+    unsigned cases=0;uint8_t seed[32]={0x19};medium.limit=30944251;
     authorized=false;assert(!picasso_data_init_begin(5242880,seed) && !medium.writes);++cases;
     authorized=true;gptBad=true;assert(!picasso_data_init_begin(5242880,seed) && !medium.writes);++cases;gptBad=false;
     ++gStoreRegionFirst;assert(!picasso_data_init_begin(5242880,seed) && !medium.writes);++cases;--gStoreRegionFirst;
@@ -149,7 +149,7 @@ static unsigned run(){
     }
     // No pending header: a torn initial journal must refuse, not infer consent.
     for(unsigned step=1;step<=3;++step)for(bool tear:{false,true}) {
-        medium=Medium{};medium.limit=15330299;medium.fail=4+step;medium.tear=tear;
+        medium=Medium{};medium.limit=30944251;medium.fail=4+step;medium.tear=tear;
         assert(!picasso_data_init_begin(5242880,seed));medium.fail=0;
         int state=picasso_data_init_begin(5242880,seed);assert(state==0 || state==1);++cases;
     }
@@ -160,7 +160,7 @@ static unsigned run(){
     medium=completed;
     // Crash during Data reset: journal stays pending until overlay is durable.
     Medium data;data.limit=persist::windowBlocks(5242880);
-    data.disk[14806002-9825114][0]=0xa5;const auto old=data.disk;
+    data.disk[30419954-25439066][0]=0xa5;const auto old=data.disk;
     std::vector<uint8_t> bits(160*4096),scratch(32*4096);persist::Overlay overlay;
     // Every reset I/O boundary, including a torn final header. No guest sees
     // this disk until BOTH complete journal slots are durable.
@@ -203,7 +203,7 @@ static void IOSleep(unsigned){assert(false && "unexpected worker wait");}
 static unsigned native_ufs_store_ready(){return 1;}
 static unsigned native_ufs_store_mode(){return 2;}
 static unsigned native_ufs_store_gpt_check(){++gptCalls;return 0;}
-static int native_ufs_store_open(uint64_t blocks,uint64_t *first,const char **why){assert(blocks==store.limit);*first=blocks==5243041?9825114:14019546;*why="";return 1;}
+static int native_ufs_store_open(uint64_t blocks,uint64_t *first,const char **why){assert(blocks==store.limit);*first=blocks==5243041?25439066:14019546;*why="";return 1;}
 static int native_ufs_store_read(uint64_t b,uint32_t n,void *p){return store.read(b,n,p);}
 static int native_ufs_store_write(uint64_t b,uint32_t n,const void *p){return store.write(b,n,p);}
 static int native_ufs_store_sync(){return store.sync();}
@@ -354,8 +354,8 @@ static unsigned run() {
         auto reads=store.reads;ram.attachStore();assert(store.reads==reads && !store.writes && ram.online);++cases;
     }
     // Entire production import -> journal -> overlay -> worker -> seedInfo.
-    InitTest::medium=Medium{};InitTest::medium.limit=15330299;
-    store=Medium{};store.limit=5243041;store.disk[14806002-9825114][0]=0xa5;
+    InitTest::medium=Medium{};InitTest::medium.limit=30944251;
+    store=Medium{};store.limit=5243041;store.disk[30419954-25439066][0]=0xa5;
     for(unsigned boot=0;boot<4;++boot) {
         NativeRamBlock ram(20ULL<<30);native_ram_block_ready=0;publications=terminated=0;
         if(boot==2)ram.seedHash[0]^=1;

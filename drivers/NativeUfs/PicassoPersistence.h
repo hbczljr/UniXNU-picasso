@@ -74,8 +74,8 @@ static void picassoLogThread(void *,wait_result_t) {
 // CRC checks still precede initialization. No writes to the root or GPT.
 extern "C" int picasso_data_init_begin(uint64_t pages,const uint8_t seed[32]) {
     uint32_t request=0;PE_parse_boot_argn("picasso-data-replace-20g",&request,sizeof(request));
-    if(!seed || pages!=5242880 || gStoreRegionBlocks!=5243041 || gStoreRegionFirst!=9825114 ||
-       gStoreGeometry.first!=2883584 || gStoreGeometry.last!=15330298 ||
+    if(!seed || pages!=5242880 || gStoreRegionBlocks!=5243041 || gStoreRegionFirst!=25439066 ||
+       gStoreGeometry.first!=2883584 || gStoreGeometry.last!=30944250 ||
        gStoreGeometry.imageBytes!=8380219392ULL || reserveBlocks()!=262144 ||
        gStoreGeometry.headerCrc!=0x3c17a352 || gStoreGeometry.entriesCrc!=0xd82988c2 ||
        native_ufs_store_gpt_check() || !picassoRecordWindowOpen())return 0;

@@ -10,16 +10,20 @@ The measured build164 LUN 0 uses 4096-byte blocks, userdata 2883584..15330298,
 root image 8380219392 bytes, GPT CRCs 3c17a352/d82988c2. These values and the
 authenticated root must match before replacement is allowed.
 
+On the 128 GiB device used here the userdata partition is 2883584..30944250
+and the Data overlay moves to 25439066..30682106 (same 20 GiB + 644 KiB size);
+the GPT CRCs for that device replace the build164 values below.
+
 | Region | First LBA | Last LBA | Size |
 | --- | ---: | ---: | ---: |
 | Root image | 2883584 | 4929535 | 8380219392 bytes |
 | Auxiliary cache | 9759578 | 9825113 | 256 MiB |
-| Data overlay | 9825114 | 15068154 | 20 GiB + 644 KiB |
-| Existing tail reserve | 15068155 | 15330298 | 1 GiB |
-| NVRAM record | 15256571 | 15256576 | 24 KiB |
-| Auxiliary owner | 15256577 | 15256580 | 16 KiB |
-| Initialization journal | 15256581 | 15256584 | 16 KiB |
-| Console record | 15322107 | 15322236 | 520 KiB |
+| Data overlay | 25439066 | 30682106 | 20 GiB + 644 KiB |
+| Existing tail reserve | 30682107 | 30944250 | 1 GiB |
+| NVRAM record | 30870523 | 30870528 | 24 KiB |
+| Auxiliary owner | 30870529 | 30870532 | 16 KiB |
+| Initialization journal | 30870533 | 30870536 | 16 KiB |
+| Console record | 30936059 | 30936188 | 520 KiB |
 
 Data is 5242880 pages plus one header and 160 bitmap blocks. The generic
 quarter-partition cap is replaced by this explicit maximum; partition/root

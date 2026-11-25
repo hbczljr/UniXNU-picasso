@@ -25,11 +25,11 @@ fetch = ["DeviceTree", "StaticTrustCache", "Cryptex1,SystemTrustCache"]
 "087-86698-044.dmg.trustcache" = "63e01c03b31e1532a5581a24865490673f0b5c297b0199fe0095637c6100ef4b"
 "087-86593-047.dmg.trustcache" = "9cc478fe3525e2683b5b9ea1eea0851eaebebdab21d206556233400e59d2e361"
 
-# UserData capacity: 0xBDEBFB000 bytes (47.48 GiB), 4096-byte sectors.
+# UserData capacity: 0x1AC2BFB000 bytes (107.03 GiB), 4096-byte sectors.
 # This capacity bounds image creation; first_lba=0 is not a measured GPT start.
 [userdata]
 first_lba = 0x0
-last_lba = 0xBDEBFA
+last_lba = 0x1AC2BFA
 lba_bytes = 4096
 windows = [
   { name = "OS", component = "OS" },

@@ -133,16 +133,16 @@ static void checkBoardApis()
     assert(!native_ufs_store_open(131072, &first, &why) && gStoreRegionBlocks == 0);
     geometry(reserve ? reserve : 1024, 0);
     assert(!native_ufs_store_open(1, &first, &why));
-    geometry(15330298ULL-2883584+1,2045952);
-    gStoreGeometry.first=2883584;gStoreGeometry.last=15330298;
+    geometry(30944250ULL-2883584+1,2045952);
+    gStoreGeometry.first=2883584;gStoreGeometry.last=30944250;
     assert(native_ufs_store_open(5243041,&first,&why));
-    assert(first==15330299ULL-reserve-5243041);
-    if(testReserveMiB==1024)assert(first==9825114);
+    assert(first==30944251ULL-reserve-5243041);
+    if(testReserveMiB==1024)assert(first==25439066);
     assert(first>gStoreGeometry.first+2045952+1024+65536);
     if(testMode==2) {
       assert(!hostInWindow(first-1,1) && !hostInWindow(first+5243041,1));
       assert(!hostInWindow(2883584,1));
-      if(reserve)assert(!hostInWindow(15330298,1));
+      if(reserve)assert(!hostInWindow(30944250,1));
     }
   }
   // Oversized tail reserves used to underflow partition-reserve in log_open.
