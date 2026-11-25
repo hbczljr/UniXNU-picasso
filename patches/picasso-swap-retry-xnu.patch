@@ -32,11 +32,19 @@
  	vm_swapfile_create_thread_running = 0;
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -8216,6 +8216,11 @@
+@@ -8216,6 +8216,19 @@
  	int data_error = native_owner_data_prepare(p, (user_addr_t)scratch_addr);
  	boot_progress_stage("Data mount returned");
 -	if (data_error) panic("offline scratch Data mount failed: %d", data_error);
-+	if (data_error) panic("offline scratch Data mount failed: %d stage=%d", data_error, native_owner_data_stage);
++	if (data_error) {
+		extern volatile uint32_t native_data_persist_state;
+		extern volatile uint32_t native_data_persist_gpt;
+		extern volatile uint32_t native_ram_block_ready;
+		extern unsigned native_ufs_store_mode(void) __attribute__((weak_import));
+		panic("offline scratch Data mount failed: %d stage=%d persist_state=%u persist_gpt=%u ready=%u mode=%u",
+		      data_error, native_owner_data_stage, native_data_persist_state, native_data_persist_gpt,
+		      native_ram_block_ready, (&native_ufs_store_mode ? native_ufs_store_mode() : 0));
+	}
 +	{
 +		/* Retry swap creation now that /private/var is writable. */
 +		extern void vm_swap_retry_create(void);
