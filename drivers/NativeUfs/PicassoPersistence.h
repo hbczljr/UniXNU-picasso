@@ -49,45 +49,55 @@ picasso_data_init::Journal gPicassoDataInit;
 uint8_t gPicassoInitScratch[4096],gPicassoInitSaved[4096];
 extern "C" void picasso_nvram_periodic_sync(void) __attribute__((weak_import));
 extern "C" uint32_t picasso_console_snapshot(void *,uint32_t,uint64_t *,uint64_t *) __attribute__((weak_import));
-static void picassoLogThread(void *,wait_result_t) {
-    uint8_t *scratch=static_cast<uint8_t *>(IOMallocZero(262144));
-    uint8_t *data=static_cast<uint8_t *>(IOMallocZero(262144));
-    if(!scratch || !data) {if(scratch)IOFree(scratch,262144);if(data)IOFree(data,262144);thread_terminate(current_thread());return;}
+/* Round 15: one durable console-snapshot writer, usable from any context.
+ *
+ * The 256 KiB record only ever landed when it was written from the Data-mount
+ * path (round 14 probe: raw=1 save=1 generation=1); every save from the log
+ * thread has failed since round 12, and the thread's own failure print can only
+ * be written into the record that already failed. So keep one Record handle and
+ * one pair of buffers here and let the exec path drive it as well: exec is the
+ * context the probe proved works, it keeps running long after the USB console
+ * dies at ~91 s, and that is what makes the ~210 s stub fallback visible.
+ * Returns 1 on success, or a negative stage code. */
+static picasso_record::Record gPicassoConsole;
+static bool gPicassoConsoleReady;
+static uint8_t *gPicassoConsoleData, *gPicassoConsoleScratch;
+extern "C" int picasso_console_record_save(const char *tag)
+{
+    (void)tag;
+    if(!&picasso_console_snapshot) return -1;
+    if(!gPicassoConsoleData) gPicassoConsoleData=static_cast<uint8_t *>(IOMallocZero(262144));
+    if(!gPicassoConsoleScratch) gPicassoConsoleScratch=static_cast<uint8_t *>(IOMallocZero(262144));
+    if(!gPicassoConsoleData || !gPicassoConsoleScratch) return -2;
     PicassoRecordOps ops;
-    uint64_t base=gStoreGeometry.last+1-kLogReserveBlocks;
-    int opened=gPicassoLog.open(ops,base,2,262144,scratch,data);
-    // Round 12: a window holding neither a valid record nor zeros is not a
-    // journal, but Record::open() deliberately leaves it usable (ready=true,
-    // returns 0) so an authorized caller can overwrite it -- the same rule the
-    // Data journal needed in round 5. Gating the whole log on opened!=0 threw
-    // that away: this boot printed PICASSO_LOG open=0 and then never recorded
-    // a byte, although the console ring and the durable window were both
-    // healthy. Keep skipping only when the window is unusable (I/O failure,
-    // ready=false), and say which case it was.
-    IOLog("PICASSO_LOG open=%d generation=%llu previous_bytes=%u ready=%u\n",
-          opened,gPicassoLog.generation,gPicassoLog.length,gPicassoLog.ready?1:0);
-    if(!opened && gPicassoLog.ready)
-        IOLog("PICASSO_LOG adopting unformatted window first=%llu\n",base);
-    uint64_t previous=0;unsigned ticks=0;
+    const uint64_t base=gStoreGeometry.last+1-kLogReserveBlocks;
+    if(!gPicassoConsoleReady) {
+        gPicassoConsole.open(ops,base,2,262144,gPicassoConsoleScratch,gPicassoConsoleData);
+        gPicassoConsoleReady=gPicassoConsole.ready;
+    }
+    if(!gPicassoConsole.ready) return -3;
+    uint64_t total=0,dropped=0;
+    uint32_t n=picasso_console_snapshot(gPicassoConsoleData,262144,&total,&dropped);
+    if(!n) return -4;
+    if(!gPicassoConsole.save(ops,gPicassoConsoleData,n,gPicassoConsoleScratch)) return -5;
+    return 1;
+}
+static void picassoLogThread(void *,wait_result_t) {
+    /* Round 15: the thread keeps the periodic housekeeping (GPT recheck, NVRAM
+     * sync) and calls the shared console-record writer, so there is exactly one
+     * Record handle for the console slots instead of two that fight over the
+     * same two slots. A refusal is reported for the first two rounds only. */
+    unsigned ticks=0;
     while(true) {
         IOSleep(10000);
-        // Same periodic GPT recheck rule as Sheng BootLog: stop records if
-        // the allocation changed underneath us. No transport reset/retry.
         if(++ticks%30==0 && native_ufs_store_gpt_check()) {
             IOLockLock(gPicassoRecordLock);gPicassoNvram.failed=true;IOLockUnlock(gPicassoRecordLock);
             IOLog("PICASSO_RECORDS GPT changed; stopped\n");break;
         }
         if(&picasso_nvram_periodic_sync)picasso_nvram_periodic_sync();
-        if((!opened && !gPicassoLog.ready) || !&picasso_console_snapshot)continue;
-        uint64_t total=0,dropped=0;
-        uint32_t n=picasso_console_snapshot(data,262144,&total,&dropped);
-        if(!n || total==previous)continue;
-        if(!gPicassoLog.save(ops,data,n,scratch)) {IOLog("PICASSO_LOG save failed; stopped\n");opened=0;gPicassoLog.ready=false;continue;}
-        previous=total;
-        // No per-save console logging: that would create its own new payload.
+        int result=picasso_console_record_save("thread");
+        if(result<0 && ticks<=2) IOLog("PICASSO_LOG thread save result=%d\n",result);
     }
-    IOFree(scratch,262144);IOFree(data,262144);
-    thread_terminate(current_thread());
 }
 }
 // Exact Picasso layout measured in build164. Root authentication and both GPT
@@ -144,43 +154,11 @@ extern "C" int picasso_persistence_start(void) {
     gPicassoNvramLoaded=state==1 && gPicassoNvram.length==8192;
     if(state==1 && !gPicassoNvramLoaded)gPicassoNvram.ready=false;
     IOLog("PICASSO_NVRAM open=%d generation=%llu restored=%u\n",state,gPicassoNvram.generation,gPicassoNvramLoaded);
-    /* Round 13/14: prove the console record while the USB console is still alive.
-     * Round 12 adopted the window and then produced no record at all, and the only
-     * diagnostic the thread has ("save failed") can only be written into the record
-     * that already failed. This probe runs in the Data-mount path, well inside the
-     * ~91 s console window. Round 13's probe called save() before the record had
-     * ever been opened (capacity 0, so save refused by construction) -- it still
-     * proved the console ring is being filled (n=262144, total=572859). Round 14
-     * opens the record first and separates the three failure modes: a bare raw
-     * block write (window/gating), a full 256 KiB slot save, and a 8 KiB save
-     * (size-dependent refusal). */
-    {
-        uint8_t *probe=static_cast<uint8_t *>(IOMallocZero(262144));
-        uint8_t *probeScratch=static_cast<uint8_t *>(IOMallocZero(262144));
-        if(probe && probeScratch) {
-            const uint64_t logBase=gStoreGeometry.last+1-kLogReserveBlocks;
-            int probeOpen=gPicassoLog.open(ops,logBase,2,262144,probeScratch,probe);
-            memset(probe,0,4096);
-            bool raw=ops.write(logBase+2,1,probe);
-            uint64_t total=0,dropped=0;
-            uint32_t n=&picasso_console_snapshot?picasso_console_snapshot(probe,262144,&total,&dropped):0;
-            bool saved=n!=0 && gPicassoLog.ready && gPicassoLog.save(ops,probe,n,probeScratch);
-            bool savedSmall=false;
-            if(!saved && n) {
-                gPicassoLog.failed=false;
-                savedSmall=gPicassoLog.ready && gPicassoLog.save(ops,probe,8192,probeScratch);
-            }
-            IOLog("PICASSO_LOG probe opened=%d ready=%u n=%u total=%llu dropped=%llu raw=%u save=%u save8k=%u generation=%llu failed=%u\n",
-                  probeOpen,gPicassoLog.ready?1U:0U,n,(unsigned long long)total,(unsigned long long)dropped,
-                  raw?1U:0U,saved?1U:0U,savedSmall?1U:0U,(unsigned long long)gPicassoLog.generation,
-                  gPicassoLog.failed?1U:0U);
-        } else {
-            IOLog("PICASSO_LOG probe unavailable probe=%u scratch=%u interface=%u\n",
-                  probe?1U:0U,probeScratch?1U:0U,&picasso_console_snapshot?1U:0U);
-        }
-        if(probe)IOFree(probe,262144);
-        if(probeScratch)IOFree(probeScratch,262144);
-    }
+    /* Round 15: one snapshot from the Data-mount path, inside the ~91 s console
+     * window, through the shared writer the exec path also uses. Round 14 proved
+     * this context can write the full 256 KiB slot (raw=1 save=1 generation=1);
+     * printing the verdict here keeps that visible in the USB capture. */
+    IOLog("PICASSO_LOG probe result=%d\n", picasso_console_record_save("mount"));
     thread_t thread=THREAD_NULL;
     if(kernel_thread_start(picassoLogThread,nullptr,&thread)==KERN_SUCCESS)thread_deallocate(thread);
     return gPicassoNvram.ready;

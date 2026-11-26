@@ -1,6 +1,35 @@
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -9384,7 +9384,98 @@
+@@ -2073,12 +2073,28 @@
+ 	proc_setexecutableuuid(p, &load_result.uuid[0]);
+ #if DEVELOPMENT || DEBUG
+ 	/* This is the new proc after activation, before its first user code. */
+ 	if (!strcmp(p->p_name, "fairplayd.H2")) {
+ 		extern void picasso_settings_service_exec(proc_t);
+ 		picasso_settings_service_exec(p);
+ 	}
+ #endif
++	/* Round 15: save the durable console record from exec, not only from the
++	 * Data-mount probe. Round 14 proved this is the context that can write the
++	 * 256 KiB slot (raw=1 save=1 generation=1) while every save from the log
++	 * thread has failed since round 12 -- and the thread cannot report its own
++	 * failure, because that print only reaches the record that already failed.
++	 * Exec keeps happening long after the USB console dies at ~91 s, which is
++	 * what makes the ~210 s stub fallback observable at all. */
++	{
++		extern int picasso_console_record_save(const char *tag);
++		extern volatile int native_owner_data_stage;
++		static unsigned execSaves;
++		if (native_owner_data_stage == 4 && ++execSaves % 8 == 0) {
++			int saveResult = picasso_console_record_save("exec");
++			if (execSaves == 8) printf("PICASSO_LOG exec-save result=%d\n", saveResult);
++		}
++	}
+ 
+ #if CONFIG_DTRACE
+ 	dtrace_proc_exec(p);
+ #endif
+@@ -9384,7 +9400,98 @@
 +	int native_picasso_gpu_diag_write(const char *text, int length);
 +	int native_picasso_gpu_diag_marker(const char *tag);
  	int mobile = mobile_dir ? mobile_dir : native_picasso_ca_pref_write(
