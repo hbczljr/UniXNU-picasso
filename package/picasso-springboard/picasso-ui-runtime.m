@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause-Patent
 // Keep the independently verified seed source intact. This signed runtime
 // build includes its status-bar/ASTC behavior plus the input cache and power-button corrections.
+#include "picasso-ui-progress.m"
 #include "picasso-springboard-probe.m"
 #include "picasso-input-cache.m"
 #include "picasso-keyboard-size.m"
