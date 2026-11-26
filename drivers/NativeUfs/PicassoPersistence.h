@@ -79,7 +79,20 @@ extern "C" int picasso_console_record_save(const char *tag)
     uint64_t total=0,dropped=0;
     uint32_t n=picasso_console_snapshot(gPicassoConsoleData,262144,&total,&dropped);
     if(!n) return -4;
-    if(!gPicassoConsole.save(ops,gPicassoConsoleData,n,gPicassoConsoleScratch)) return -5;
+    if(!gPicassoConsole.save(ops,gPicassoConsoleData,n,gPicassoConsoleScratch)) {
+        /* Round 18: Record::save() latches failed=true on any write error and then
+         * refuses every later save. Round 17's boot saved once (the mount probe,
+         * generation 54) and then never advanced again for the whole boot, so the
+         * channels died on one transient write while the UFS store stayed healthy
+         * (the NVRAM record kept its generation). A failed slot write leaves the
+         * other slot intact -- Record::save() writes the next slot and bumps the
+         * generation only after the header lands -- so clearing the latch and
+         * retrying on the next call is safe and keeps the record alive. */
+        gPicassoConsole.failed=false;
+        static unsigned refusals;
+        if(++refusals<=3) IOLog("PICASSO_LOG save retry scheduled refusals=%u\n",refusals);
+        return -5;
+    }
     return 1;
 }
 static void picassoLogThread(void *,wait_result_t) {
