@@ -1,0 +1,35 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7522,16 +7522,24 @@
+ 	*stage = 3;
+-	/* The union must still show a sealed lower entry next to the owner's. */
++	/* The union must still show a sealed lower entry next to the owner's.
++	 * Round 10: iPhone X (A11) seals AGXMetalA11.bundle, not the A10 name this
++	 * check was written against; accept either. The owner's own entry is
++	 * checked regardless, so a wrong sealed name cannot hide whether the
++	 * bundle itself is visible (stage 5). */
+ 	error = vnode_lookup(visible, 0, &probe, vfs_context_current());
++	if (error) {
++		static const char visible_a11[] = "/System/Library/Extensions/AGXMetalA11.bundle";
++		error = vnode_lookup(visible_a11, 0, &probe, vfs_context_current());
++	}
+ 	if (!error) {
+ 		vnode_put(probe);
+ 		probe = NULLVP;
+ 		*stage = 4;
+-		/* ... and the owner's own entry must be visible through it (stage 5). */
+-		error = vnode_lookup(own, 0, &probe, vfs_context_current());
+-		if (!error) {
+-			vnode_put(probe);
+-			probe = NULLVP;
+-			*stage = 5;
+-		}
++	}
++	/* ... and the owner's own entry must be visible through it (stage 5). */
++	error = vnode_lookup(own, 0, &probe, vfs_context_current());
++	if (!error) {
++		vnode_put(probe);
++		probe = NULLVP;
++		*stage = 5;
+ 	}
+ 	*status = error;

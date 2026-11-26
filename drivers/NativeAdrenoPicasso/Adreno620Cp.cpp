@@ -25,6 +25,7 @@
 #include "Adreno620Firmware.h"
 #include "Adreno620Probe.h"
 #include "Adreno620ProbeCore.h"
+#include "Adreno620StubFallback.h"
 #include "PicassoRpmh.h"
 #include "PicassoPas.h"
 #include "NativeAdrenoABI.h"
@@ -159,6 +160,16 @@ extern "C" uint32_t native_adreno_metal_opens(void);
 extern "C" uint32_t native_adreno_metal_foreign_opens(void);
 extern "C" uint32_t native_adreno_metal_last(uint32_t *selector, uint32_t *status);
 extern "C" uint32_t native_adreno_metal_marks(uint32_t *out, uint32_t capacity);
+/* Round 10: discovery counters (NativeAdrenoPublish.cpp), the late stub
+ * fallback (package/PicassoDisplay.cpp) and the durable snapshot writer
+ * (bsd/kern/kern_exec.c, picasso-gpu-diag-file patch; weak so an image
+ * without it still boots). */
+extern "C" uint32_t native_adreno_metal_name_reads(void);
+extern "C" uint32_t native_adreno_metal_property_reads(void);
+extern "C" const char *native_adreno_metal_name_reader(void);
+extern "C" bool picasso_accelerator_stub_published(void);
+extern "C" bool picasso_accelerator_stub_publish_once(void);
+extern "C" int native_picasso_gpu_diag_write(const char *text, int length) __attribute__((weak_import));
 /* Why the latest user connection's mount failed ([0] 1 no address space,
  * 2 the core's open, 3 the window scope; [1] its IOReturn; [3] count), the
  * table-switch proof and the CP switch check. */
@@ -2077,8 +2088,35 @@ bool publishMetal()
 
 /* The boot addon's report (sheng-gpu-addon=1): launchd's first exec runs the
  * mount, so read the three stage/status pairs from a thread after it. Stages:
- * 1 source probed, 2 mounted, 3.. the visible paths checked; status is the
- * last error (0 mounted). */
+ * 1 source probed, 2 mounted, 3 the sealed lower entry checked, 4 the sealed
+ * entry visible, 5 the owner's own entry visible; status is the last error
+ * (0 when the own entry is visible). Round 10 accepts either sealed name
+ * (AGXMetalA10/A11) and checks the own entry regardless. */
+static void picasso_gpu_diag_write_file(unsigned round)
+{
+    /* Round 10: durable GPU snapshot on Data. The USB console dies ~91 s after
+     * boot (the iOS USB stack takes over CDC-ACM) and the unified log's ring
+     * is flooded by bluetoothd, so a later boot's decisive facts (did anyone
+     * read MetalPluginName, did the stub fallback fire) would otherwise be
+     * lost. The writer lives in kern_exec.c (picasso-gpu-diag-file patch) and
+     * rewrites /private/var/picasso-gpu-diag.log with the newest snapshot each
+     * round; a failed write is counted here and given up after three rounds. */
+    if (!native_picasso_gpu_diag_write) return;
+    static unsigned failures = 0;
+    if (failures >= 3) return;
+    char text[512];
+    const int length = snprintf(text, sizeof text,
+        "round=%u opens=%u foreign=%u name_reads=%u prop_reads=%u asker=%s stub=%u subs=%u/%u/%u/%u ext=%d/%d\n",
+        round, native_adreno_metal_opens(), native_adreno_metal_foreign_opens(),
+        native_adreno_metal_name_reads(), native_adreno_metal_property_reads(),
+        native_adreno_metal_name_reader(), picasso_accelerator_stub_published() ? 1u : 0u,
+        native_adreno_submit_ibs[0], native_adreno_submit_ibs[1],
+        native_adreno_submit_ibs[2], native_adreno_submit_ibs[3],
+        native_gpu_addon_stage, native_gpu_addon_status);
+    if (length <= 0) return;
+    if (native_picasso_gpu_diag_write(text, length) != 0) ++failures;
+}
+
 void addonReport(void *, wait_result_t)
 {
     IOSleep(20000);
@@ -2089,9 +2127,11 @@ void addonReport(void *, wait_result_t)
     printf("PICASSO_GPU submits: submissions=%u ibs=%u max=%u many=%u\n",
         native_adreno_submit_ibs[0], native_adreno_submit_ibs[1],
         native_adreno_submit_ibs[2], native_adreno_submit_ibs[3]);
-    printf("PICASSO_GPU metal diag: opens=%u foreign=%u report=%s report2=%s\n",
+    printf("PICASSO_GPU metal diag: opens=%u foreign=%u report=%s report2=%s name_reads=%u prop_reads=%u asker=%s stub=%u\n",
         native_adreno_metal_opens(), native_adreno_metal_foreign_opens(),
-        native_adreno_metal_report(), native_adreno_metal_report2());
+        native_adreno_metal_report(), native_adreno_metal_report2(),
+        native_adreno_metal_name_reads(), native_adreno_metal_property_reads(),
+        native_adreno_metal_name_reader(), picasso_accelerator_stub_published() ? 1u : 0u);
     printf("PICASSO_GPU mount: fail=%u/%x count=%u ttbr=%u/%u cp=%x/%x check=%x/%x/%x/%x/%x/%x\n",
         native_adreno_mount_fail[0], native_adreno_mount_fail[1], native_adreno_mount_fail[3],
         native_adreno_table_switches[6], native_adreno_table_switches[7],
@@ -2112,9 +2152,11 @@ void addonReport(void *, wait_result_t)
     printf("PICASSO_GPU submits later: submissions=%u ibs=%u max=%u many=%u\n",
         native_adreno_submit_ibs[0], native_adreno_submit_ibs[1],
         native_adreno_submit_ibs[2], native_adreno_submit_ibs[3]);
-    printf("PICASSO_GPU metal later: opens=%u foreign=%u report=%s report2=%s\n",
+    printf("PICASSO_GPU metal later: opens=%u foreign=%u report=%s report2=%s name_reads=%u prop_reads=%u asker=%s stub=%u\n",
         native_adreno_metal_opens(), native_adreno_metal_foreign_opens(),
-        native_adreno_metal_report(), native_adreno_metal_report2());
+        native_adreno_metal_report(), native_adreno_metal_report2(),
+        native_adreno_metal_name_reads(), native_adreno_metal_property_reads(),
+        native_adreno_metal_name_reader(), picasso_accelerator_stub_published() ? 1u : 0u);
     /* wf128: the first two samples land before the render server exists (backboardd opens the
      * accelerator after the dyld-cache phase). This third sample, three minutes in, shows
      * whether client submissions keep arriving instead of stopping after the first burst. */
@@ -2122,14 +2164,34 @@ void addonReport(void *, wait_result_t)
     printf("PICASSO_GPU submits final: submissions=%u ibs=%u max=%u many=%u\n",
         native_adreno_submit_ibs[0], native_adreno_submit_ibs[1],
         native_adreno_submit_ibs[2], native_adreno_submit_ibs[3]);
-    printf("PICASSO_GPU metal final: opens=%u foreign=%u report=%s report2=%s\n",
+    printf("PICASSO_GPU metal final: opens=%u foreign=%u report=%s report2=%s name_reads=%u prop_reads=%u asker=%s stub=%u\n",
         native_adreno_metal_opens(), native_adreno_metal_foreign_opens(),
-        native_adreno_metal_report(), native_adreno_metal_report2());
+        native_adreno_metal_report(), native_adreno_metal_report2(),
+        native_adreno_metal_name_reads(), native_adreno_metal_property_reads(),
+        native_adreno_metal_name_reader(), picasso_accelerator_stub_published() ? 1u : 0u);
+    picasso_gpu_diag_write_file(0);
     /* wf133: the UI comes up minutes after the third sample (wf132 saw the lock screen with the
      * +180 s counter still at the five setup submissions), so keep reporting: whether the
      * compositor's later frames are GPU work shows up here as the counter growing. */
     for (unsigned round = 1;; ++round) {
         IOSleep(30000);
+        /* Round 10: if the Metal plugin never opened the service, give
+         * CoreAnimation its software path back with the CPU stub (see
+         * Adreno620StubFallback.h). An explicit picasso-accel-stub=0 opts
+         * out. The snapshot below is also written to Data every round, so
+         * the state survives the dead USB console. */
+        {
+            unsigned stubArg = 1;
+            const bool stubOptOut = PE_parse_boot_argn("picasso-accel-stub", &stubArg,
+                static_cast<int>(sizeof stubArg)) && stubArg == 0;
+            if (picasso::stubFallbackDue(picasso_accelerator_stub_published(),
+                    native_adreno_metal_opens(), stubOptOut, round)) {
+                const bool fallback = picasso_accelerator_stub_publish_once();
+                printf("PICASSO_GPU stub fallback published=%u opens=%u\n",
+                    fallback ? 1u : 0u, native_adreno_metal_opens());
+            }
+            picasso_gpu_diag_write_file(round);
+        }
         /* Write-combine maintenance cost, cumulative: the per-submission re-assertion walks every page of every write-combined
          * mapping (the fix for XNU resetting attributes on a view teardown), and the cache-maintenance passes. A submission's
          * share of these is the suspect when a client's submit call is slower than the work it describes. */

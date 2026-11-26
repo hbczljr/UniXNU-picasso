@@ -304,6 +304,7 @@ static void publishDisplayModes(IOService *display, uint32_t width, uint32_t hei
     OSSafeReleaseNULL(color); OSSafeReleaseNULL(timings); OSSafeReleaseNULL(colors);
 }
 
+static bool gStubPublished = false;  /* Round 10: the CPU stub's service, once started. */
 static void publishAcceleratorStub(void) {
     unsigned requested = 1;
     PE_parse_boot_argn("picasso-accel-stub", &requested, sizeof(requested));
@@ -337,11 +338,51 @@ static void publishAcceleratorStub(void) {
     // The registry keeps the published service alive; drop the allocation reference either way.
     OSSafeReleaseNULL(accel);
     IOLog("PICASSO_ACCEL published=%u\n", started);
+    if (started) gStubPublished = true;
     // Its metaclass was registered with the accelerator's above (same file). boot-arg
     // picasso-power-source=0 leaves the gauge service disabled.
     unsigned power = 1;
     PE_parse_boot_argn("picasso-power-source", &power, sizeof(power));
     if (power == 1) IOLog("PICASSO_POWER battery service started=%u\n", picasso_power_source_publish());
+}
+
+/* Round 10: late CPU-stub fallback (driven by Adreno620Cp.cpp addonReport).
+ * The early path above already ran preModLoad, the static initializer and
+ * postModLoad even when sheng-gpu-metal=1 suppressed the allocation (the
+ * boot log shows handle=1 status=0 with accel=0), so this only allocates,
+ * inits, attaches and starts the already-registered class. It runs at most
+ * once; a stub published early makes this a no-op. The stub advertises no
+ * MetalPluginName, so Metal discovery skips it (it cannot shadow the AGX
+ * plugin); it only gives CoreAnimation its software path back, the same
+ * fallback that brought mondrian to the main UI and that wf132's lock screen
+ * ran on. */
+extern "C" bool picasso_accelerator_stub_published(void)
+{
+    return gStubPublished;
+}
+
+extern "C" bool picasso_accelerator_stub_publish_once(void)
+{
+    if (gStubPublished) return true;
+    const OSSymbol *name = OSSymbol::withCString("PicassoCpuAccelerator");
+    const OSMetaClass *meta = name ? OSMetaClass::getMetaClassWithName(name) : nullptr;
+    OSSafeReleaseNULL(name);
+    IOService *provider = IOService::getResourceService();
+    if (!meta || !provider) {
+        IOLog("PICASSO_ACCEL stub fallback refused meta=%u provider=%u\n",
+            meta != nullptr, provider != nullptr);
+        return false;
+    }
+    IOService *accel = picasso_accelerator_allocate();
+    bool didInit = accel && accel->init();
+    bool didAttach = didInit && accel->attach(provider);
+    bool didStart = didAttach && accel->start(provider);
+    IOLog("PICASSO_ACCEL stub fallback accel=%u initialized=%u attached=%u started=%u\n",
+        accel != nullptr, didInit, didAttach, didStart);
+    if (!didStart && didAttach) accel->detach(provider);
+    OSSafeReleaseNULL(accel);
+    gStubPublished = didStart;
+    return didStart;
 }
 
 // IOBSD is published at this call site. Load the original software network

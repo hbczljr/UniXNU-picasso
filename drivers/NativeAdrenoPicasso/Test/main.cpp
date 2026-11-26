@@ -6,6 +6,7 @@
 #include "Adreno620Board.h"
 #include "Adreno620Firmware.h"
 #include "Adreno620ProbeCore.h"
+#include "Adreno620StubFallback.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -874,8 +875,25 @@ static void testVendor(const char *directory)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Round 10: late CPU-stub fallback decision
+// ---------------------------------------------------------------------------
+static void testStubFallback()
+{
+    using picasso::stubFallbackDue;
+    CHECK(stubFallbackDue(false, 0, false, 1));
+    CHECK(stubFallbackDue(false, 0, false, 7));
+    CHECK(!stubFallbackDue(false, 0, false, 0));
+    CHECK(!stubFallbackDue(true, 0, false, 1));
+    CHECK(!stubFallbackDue(false, 1, false, 1));
+    CHECK(!stubFallbackDue(false, 3, false, 9));
+    CHECK(!stubFallbackDue(false, 0, true, 1));
+    CHECK(!stubFallbackDue(true, 2, true, 5));
+}
+
 int main()
 {
+    testStubFallback();
     testCrc();
     testDt();
     testBoard();

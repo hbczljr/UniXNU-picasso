@@ -58,6 +58,14 @@ extern "C" const char *native_adreno_metal_report(void) {return native_adreno_me
 extern "C" const char *native_adreno_metal_report2(void) {return native_adreno_metal_diag.report2;}
 extern "C" uint32_t native_adreno_metal_opens(void) {return native_adreno_metal_diag.opens;}
 extern "C" uint32_t native_adreno_metal_foreign_opens(void) {return native_adreno_metal_diag.foreign_opens;}
+/* Round 10: the discovery counters the addon report prints, so a boot that never
+ * opens the service can still tell "no process enumerated it" (name_reads 0)
+ * from "a process enumerated it but the bundle never loaded" (name_reads > 0,
+ * opens 0). property_reads counts every registry-property read of the
+ * accelerator; name_reader is the latest process that read MetalPluginName. */
+extern "C" uint32_t native_adreno_metal_name_reads(void) {return native_adreno_metal_diag.name_reads;}
+extern "C" uint32_t native_adreno_metal_property_reads(void) {return native_adreno_metal_diag.property_reads;}
+extern "C" const char *native_adreno_metal_name_reader(void) {return native_adreno_metal_diag.name_reader;}
 extern "C" uint32_t native_adreno_metal_last(uint32_t *selector, uint32_t *status)
 {
     if(selector)*selector=native_adreno_metal_diag.last_selector;

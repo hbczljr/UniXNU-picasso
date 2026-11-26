@@ -1,0 +1,41 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -9384,7 +9384,38 @@
+ 	int mobile = mobile_dir ? mobile_dir : native_picasso_ca_pref_write(
+ 	    "/private/var/mobile/Library/Preferences/backboardd.plist");
+ 	int system = system_dir ? system_dir : native_picasso_ca_pref_write(
+ 	    "/private/var/preferences/.GlobalPreferences.plist");
+ 	printf("PICASSO_CA_PREFS mobile=%d system=%d\n", mobile, system);
+ }
++
++/* Round 10: durable GPU snapshot for a boot whose USB console dies (~91 s)
++ * and whose unified log is flooded by bluetoothd. The report thread calls
++ * this from the kernel with the latest counters; the file is overwritten
++ * each time so it always holds the newest snapshot. Best effort only. */
++int
++native_picasso_gpu_diag_write(const char *text, int length)
++{
++	vfs_context_t ctx = vfs_context_current();
++	vnode_t vp = NULLVP;
++	int error;
++	if (length <= 0) {
++		return EINVAL;
++	}
++	error = vnode_open("/private/var/picasso-gpu-diag.log",
++	    O_CREAT | O_TRUNC | FWRITE | O_NOFOLLOW, 0644, 0, &vp, ctx);
++	if (error) {
++		return error;
++	}
++	int resid = 0;
++	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)text, length, 0, UIO_SYSSPACE,
++	    IO_NOAUTH | IO_UNIT, vfs_context_ucred(ctx), &resid, vfs_context_proc(ctx));
++	if (!error && resid) {
++		error = EIO;
++	}
++	if (!error) {
++		error = VNOP_FSYNC(vp, MNT_WAIT, ctx);
++	}
++	int close_error = vnode_close(vp, FWRITE, ctx);
++	return error ? error : close_error;
++}
+ #endif
