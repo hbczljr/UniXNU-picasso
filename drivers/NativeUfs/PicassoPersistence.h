@@ -52,7 +52,18 @@ static void picassoLogThread(void *,wait_result_t) {
     PicassoRecordOps ops;
     uint64_t base=gStoreGeometry.last+1-kLogReserveBlocks;
     int opened=gPicassoLog.open(ops,base,2,262144,scratch,data);
-    IOLog("PICASSO_LOG open=%d generation=%llu previous_bytes=%u\n",opened,gPicassoLog.generation,gPicassoLog.length);
+    // Round 12: a window holding neither a valid record nor zeros is not a
+    // journal, but Record::open() deliberately leaves it usable (ready=true,
+    // returns 0) so an authorized caller can overwrite it -- the same rule the
+    // Data journal needed in round 5. Gating the whole log on opened!=0 threw
+    // that away: this boot printed PICASSO_LOG open=0 and then never recorded
+    // a byte, although the console ring and the durable window were both
+    // healthy. Keep skipping only when the window is unusable (I/O failure,
+    // ready=false), and say which case it was.
+    IOLog("PICASSO_LOG open=%d generation=%llu previous_bytes=%u ready=%u\n",
+          opened,gPicassoLog.generation,gPicassoLog.length,gPicassoLog.ready?1:0);
+    if(!opened && gPicassoLog.ready)
+        IOLog("PICASSO_LOG adopting unformatted window first=%llu\n",base);
     uint64_t previous=0;unsigned ticks=0;
     while(true) {
         IOSleep(10000);
@@ -63,11 +74,11 @@ static void picassoLogThread(void *,wait_result_t) {
             IOLog("PICASSO_RECORDS GPT changed; stopped\n");break;
         }
         if(&picasso_nvram_periodic_sync)picasso_nvram_periodic_sync();
-        if(!opened || !&picasso_console_snapshot)continue;
+        if((!opened && !gPicassoLog.ready) || !&picasso_console_snapshot)continue;
         uint64_t total=0,dropped=0;
         uint32_t n=picasso_console_snapshot(data,262144,&total,&dropped);
         if(!n || total==previous)continue;
-        if(!gPicassoLog.save(ops,data,n,scratch)) {IOLog("PICASSO_LOG save failed; stopped\n");opened=0;continue;}
+        if(!gPicassoLog.save(ops,data,n,scratch)) {IOLog("PICASSO_LOG save failed; stopped\n");opened=0;gPicassoLog.ready=false;continue;}
         previous=total;
         // No per-save console logging: that would create its own new payload.
     }
