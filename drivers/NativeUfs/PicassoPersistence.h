@@ -144,24 +144,38 @@ extern "C" int picasso_persistence_start(void) {
     gPicassoNvramLoaded=state==1 && gPicassoNvram.length==8192;
     if(state==1 && !gPicassoNvramLoaded)gPicassoNvram.ready=false;
     IOLog("PICASSO_NVRAM open=%d generation=%llu restored=%u\n",state,gPicassoNvram.generation,gPicassoNvramLoaded);
-    /* Round 13: prove the console record while the USB console is still alive.
-     * Round 12 adopted the window and then produced no record at all, and the
-     * only diagnostic (the thread's "save failed" print) could only ever be
-     * written into the record that had already failed. This synchronous probe
-     * runs in the Data-mount path, well inside the ~91 s console window, and
-     * prints the ring size, the snapshot size and the save verdict. */
+    /* Round 13/14: prove the console record while the USB console is still alive.
+     * Round 12 adopted the window and then produced no record at all, and the only
+     * diagnostic the thread has ("save failed") can only be written into the record
+     * that already failed. This probe runs in the Data-mount path, well inside the
+     * ~91 s console window. Round 13's probe called save() before the record had
+     * ever been opened (capacity 0, so save refused by construction) -- it still
+     * proved the console ring is being filled (n=262144, total=572859). Round 14
+     * opens the record first and separates the three failure modes: a bare raw
+     * block write (window/gating), a full 256 KiB slot save, and a 8 KiB save
+     * (size-dependent refusal). */
     {
         uint8_t *probe=static_cast<uint8_t *>(IOMallocZero(262144));
         uint8_t *probeScratch=static_cast<uint8_t *>(IOMallocZero(262144));
-        if(probe && probeScratch && &picasso_console_snapshot) {
+        if(probe && probeScratch) {
+            const uint64_t logBase=gStoreGeometry.last+1-kLogReserveBlocks;
+            int probeOpen=gPicassoLog.open(ops,logBase,2,262144,probeScratch,probe);
+            memset(probe,0,4096);
+            bool raw=ops.write(logBase+2,1,probe);
             uint64_t total=0,dropped=0;
-            uint32_t n=picasso_console_snapshot(probe,262144,&total,&dropped);
-            bool saved=n!=0 && gPicassoLog.save(ops,probe,n,probeScratch);
-            IOLog("PICASSO_LOG probe snapshot=%u n=%u total=%llu dropped=%llu save=%u generation=%llu ready=%u\n",
-                  n?1U:0U,n,(unsigned long long)total,(unsigned long long)dropped,saved?1U:0U,
-                  (unsigned long long)gPicassoLog.generation,gPicassoLog.ready?1U:0U);
+            uint32_t n=&picasso_console_snapshot?picasso_console_snapshot(probe,262144,&total,&dropped):0;
+            bool saved=n!=0 && gPicassoLog.ready && gPicassoLog.save(ops,probe,n,probeScratch);
+            bool savedSmall=false;
+            if(!saved && n) {
+                gPicassoLog.failed=false;
+                savedSmall=gPicassoLog.ready && gPicassoLog.save(ops,probe,8192,probeScratch);
+            }
+            IOLog("PICASSO_LOG probe opened=%d ready=%u n=%u total=%llu dropped=%llu raw=%u save=%u save8k=%u generation=%llu failed=%u\n",
+                  probeOpen,gPicassoLog.ready?1U:0U,n,(unsigned long long)total,(unsigned long long)dropped,
+                  raw?1U:0U,saved?1U:0U,savedSmall?1U:0U,(unsigned long long)gPicassoLog.generation,
+                  gPicassoLog.failed?1U:0U);
         } else {
-            IOLog("PICASSO_LOG probe unavailable ring=%u scratch=%u interface=%u\n",
+            IOLog("PICASSO_LOG probe unavailable probe=%u scratch=%u interface=%u\n",
                   probe?1U:0U,probeScratch?1U:0U,&picasso_console_snapshot?1U:0U);
         }
         if(probe)IOFree(probe,262144);
