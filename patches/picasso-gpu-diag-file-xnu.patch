@@ -1,28 +1,37 @@
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -2257,6 +2257,21 @@
- 	int error;
- 	int resid;
- 	int once = 1;   /* save SGUID-ness for interpreted files */
+@@ -2260,6 +2260,30 @@
+ 	int i;
+ 	int itercount = 0;
+ 	proc_t p = vfs_context_proc(imgp->ip_vfs_context);
 +	/* Round 16: save the durable console record from image activation, which is
 +	 * the one path both execve() and posix_spawn() take. Round 15 hooked
 +	 * exec_mach_imgact and no save ever happened: iOS launches almost everything
-+	 * through posix_spawn. This is also the context the round-14 probe proved
-+	 * writable, and it keeps occurring long after the USB console dies at ~91 s,
-+	 * which is what makes the ~210 s stub fallback observable at all. */
++	 * through posix_spawn. This is the context the round-14 probe proved
++	 * writable, so a save here is what keeps the record alive after the USB
++	 * console dies at ~91 s. */
 +	{
 +		extern int picasso_console_record_save(const char *tag);
 +		extern volatile int native_owner_data_stage;
 +		static unsigned activations;
-+		if (native_owner_data_stage == 4 && ++activations % 8 == 0) {
++		/* Round 20: round 16 reached SpringBoard and advanced the record 53 times;
++		 * rounds 17-19 each advanced it once (the mount probe) even after the
++		 * userspace change was reverted, so after mounting fewer than eight image
++		 * activations happen at all. Name the first twelve so the record itself
++		 * says whether the system launches anything, and how far it gets. */
++		if (native_owner_data_stage == 4 && ++activations <= 12) {
++			printf("PICASSO_EXECN n=%u pid=%d name=%s\n", activations,
++			    proc_pid(p), p->p_name);
++		}
++		if (native_owner_data_stage == 4 && activations % 8 == 0) {
 +			int saveResult = picasso_console_record_save("exec");
 +			if (activations == 8) printf("PICASSO_LOG exec-save result=%d\n", saveResult);
 +		}
 +	}
- 	int i;
- 	int itercount = 0;
- 	proc_t p = vfs_context_proc(imgp->ip_vfs_context);
-@@ -9384,7 +9414,98 @@
+ 
+ 	/*
+ 	 * For exec, the translock needs to be taken on old proc and not
+@@ -9384,7 +9408,98 @@
 +	int native_picasso_gpu_diag_write(const char *text, int length);
 +	int native_picasso_gpu_diag_marker(const char *tag);
  	int mobile = mobile_dir ? mobile_dir : native_picasso_ca_pref_write(
