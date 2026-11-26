@@ -13,7 +13,11 @@ struct PicassoRecordOps {
             b+=k;n-=k;p=static_cast<uint8_t *>(p)+k*4096;}return true;
     }
     bool write(uint64_t b,uint32_t n,const void *p) {
-        while(n){uint32_t k=n>32?32:n;if(hostWrite4k(0,b,k,p,true)!=kIOReturnSuccess)return false;
+        while(n){uint32_t k=n>32?32:n;IOReturn status=hostWrite4k(0,b,k,p,true);
+            /* Round 13: a refused raw write used to be invisible -- the record simply
+             * never appeared and nothing said why. Name the failing window here. */
+            if(status!=kIOReturnSuccess){IOLog("PICASSO_RECORD write refused lba=%llu blocks=%u status=%08x\n",
+                (unsigned long long)b,k,(unsigned)status);return false;}
             b+=k;n-=k;p=static_cast<const uint8_t *>(p)+k*4096;}return true;
     }
     bool sync() {return hostSyncCache()==kIOReturnSuccess;}
@@ -140,6 +144,29 @@ extern "C" int picasso_persistence_start(void) {
     gPicassoNvramLoaded=state==1 && gPicassoNvram.length==8192;
     if(state==1 && !gPicassoNvramLoaded)gPicassoNvram.ready=false;
     IOLog("PICASSO_NVRAM open=%d generation=%llu restored=%u\n",state,gPicassoNvram.generation,gPicassoNvramLoaded);
+    /* Round 13: prove the console record while the USB console is still alive.
+     * Round 12 adopted the window and then produced no record at all, and the
+     * only diagnostic (the thread's "save failed" print) could only ever be
+     * written into the record that had already failed. This synchronous probe
+     * runs in the Data-mount path, well inside the ~91 s console window, and
+     * prints the ring size, the snapshot size and the save verdict. */
+    {
+        uint8_t *probe=static_cast<uint8_t *>(IOMallocZero(262144));
+        uint8_t *probeScratch=static_cast<uint8_t *>(IOMallocZero(262144));
+        if(probe && probeScratch && &picasso_console_snapshot) {
+            uint64_t total=0,dropped=0;
+            uint32_t n=picasso_console_snapshot(probe,262144,&total,&dropped);
+            bool saved=n!=0 && gPicassoLog.save(ops,probe,n,probeScratch);
+            IOLog("PICASSO_LOG probe snapshot=%u n=%u total=%llu dropped=%llu save=%u generation=%llu ready=%u\n",
+                  n?1U:0U,n,(unsigned long long)total,(unsigned long long)dropped,saved?1U:0U,
+                  (unsigned long long)gPicassoLog.generation,gPicassoLog.ready?1U:0U);
+        } else {
+            IOLog("PICASSO_LOG probe unavailable ring=%u scratch=%u interface=%u\n",
+                  probe?1U:0U,probeScratch?1U:0U,&picasso_console_snapshot?1U:0U);
+        }
+        if(probe)IOFree(probe,262144);
+        if(probeScratch)IOFree(probeScratch,262144);
+    }
     thread_t thread=THREAD_NULL;
     if(kernel_thread_start(picassoLogThread,nullptr,&thread)==KERN_SUCCESS)thread_deallocate(thread);
     return gPicassoNvram.ready;
