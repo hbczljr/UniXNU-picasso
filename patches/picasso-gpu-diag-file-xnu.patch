@@ -1,28 +1,39 @@
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -9384,7 +9384,38 @@
+@@ -9384,7 +9384,98 @@
++	int native_picasso_gpu_diag_write(const char *text, int length);
++	int native_picasso_gpu_diag_marker(const char *tag);
  	int mobile = mobile_dir ? mobile_dir : native_picasso_ca_pref_write(
  	    "/private/var/mobile/Library/Preferences/backboardd.plist");
  	int system = system_dir ? system_dir : native_picasso_ca_pref_write(
  	    "/private/var/preferences/.GlobalPreferences.plist");
  	printf("PICASSO_CA_PREFS mobile=%d system=%d\n", mobile, system);
++	/* Round 11: leave a durable marker from this process context, which is the
++	 * one the ca-preferences write already proved able to create a file under
++	 * /private/var. It is the control against the report thread's kernel-thread
++	 * writer: whichever tag the file ends up holding names the last writer that
++	 * actually ran, so a missing later tag cannot be mistaken for a dead thread. */
++	native_picasso_gpu_diag_marker("ca-prefs");
  }
 +
 +/* Round 10: durable GPU snapshot for a boot whose USB console dies (~91 s)
-+ * and whose unified log is flooded by bluetoothd. The report thread calls
-+ * this from the kernel with the latest counters; the file is overwritten
-+ * each time so it always holds the newest snapshot. Best effort only. */
-+int
-+native_picasso_gpu_diag_write(const char *text, int length)
++ * and whose unified log is flooded by bluetoothd. Round 11 keeps the writer
++ * but fixes the two things round 10 could not tell apart, because its file
++ * never appeared: the single hard-coded path and the caller's context.
++ *
++ * So the write walks a short path list instead, mobile-owned first: the
++ * ca-preferences write proves a file under /private/var/mobile is creatable
++ * from kernel exec context, while the volume root (/private/var) may be
++ * root-owned and out of reach for a mobile-credential caller. The first
++ * directory that accepts the file wins and its 1-based index is returned, so
++ * the USB console reports the winner while it still lives. */
++static int
++native_picasso_gpu_diag_write_one(const char *path, const char *text, int length)
 +{
 +	vfs_context_t ctx = vfs_context_current();
 +	vnode_t vp = NULLVP;
 +	int error;
-+	if (length <= 0) {
-+		return EINVAL;
-+	}
-+	error = vnode_open("/private/var/picasso-gpu-diag.log",
-+	    O_CREAT | O_TRUNC | FWRITE | O_NOFOLLOW, 0644, 0, &vp, ctx);
++	error = vnode_open(path, O_CREAT | O_TRUNC | FWRITE | O_NOFOLLOW, 0644, 0, &vp, ctx);
 +	if (error) {
 +		return error;
 +	}
@@ -33,9 +44,58 @@
 +		error = EIO;
 +	}
 +	if (!error) {
++		struct vnode_attr va;
++		VATTR_INIT(&va);
++		VATTR_SET(&va, va_mode, 0644);
++		VATTR_SET(&va, va_uid, 501);
++		VATTR_SET(&va, va_gid, 501);
++		error = vnode_setattr(vp, &va, ctx);
++	}
++	if (!error) {
 +		error = VNOP_FSYNC(vp, MNT_WAIT, ctx);
 +	}
 +	int close_error = vnode_close(vp, FWRITE, ctx);
 +	return error ? error : close_error;
++}
++
++int
++native_picasso_gpu_diag_write(const char *text, int length)
++{
++	static const char *const paths[] = {
++		"/private/var/mobile/Library/Preferences/picasso-gpu-diag.log",
++		"/private/var/mobile/picasso-gpu-diag.log",
++		"/private/var/picasso-gpu-diag.log",
++		"/private/var/tmp/picasso-gpu-diag.log",
++	};
++	int error = EINVAL;
++	if (!text || length <= 0) {
++		return -EINVAL;
++	}
++	for (unsigned i = 0; i < sizeof paths / sizeof paths[0]; ++i) {
++		error = native_picasso_gpu_diag_write_one(paths[i], text, length);
++		if (!error) {
++			return (int)(i + 1);
++		}
++	}
++	return error ? -error : -EIO;
++}
++
++/* Round 11: the kernel-side control writer. Called from exec context (the ca
++ * preferences hook), it records which process context the channel works from. */
++int
++native_picasso_gpu_diag_marker(const char *tag)
++{
++	char text[128];
++	int length = snprintf(text, sizeof text, "v11 tag=%s writer=exec-marker\n", tag);
++	int result;
++	if (length <= 0) {
++		return -EINVAL;
++	}
++	if (length >= (int)sizeof text) {
++		length = (int)sizeof text - 1;
++	}
++	result = native_picasso_gpu_diag_write(text, length);
++	printf("PICASSO_GPU_DIAG marker=%s result=%d\n", tag, result);
++	return result;
 +}
  #endif

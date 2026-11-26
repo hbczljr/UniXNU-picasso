@@ -2092,33 +2092,55 @@ bool publishMetal()
  * entry visible, 5 the owner's own entry visible; status is the last error
  * (0 when the own entry is visible). Round 10 accepts either sealed name
  * (AGXMetalA10/A11) and checks the own entry regardless. */
-static void picasso_gpu_diag_write_file(unsigned round)
+static int picasso_gpu_diag_write(const char *tag, unsigned round)
 {
     /* Round 10: durable GPU snapshot on Data. The USB console dies ~91 s after
      * boot (the iOS USB stack takes over CDC-ACM) and the unified log's ring
      * is flooded by bluetoothd, so a later boot's decisive facts (did anyone
      * read MetalPluginName, did the stub fallback fire) would otherwise be
      * lost. The writer lives in kern_exec.c (picasso-gpu-diag-file patch) and
-     * rewrites /private/var/picasso-gpu-diag.log with the newest snapshot each
-     * round; a failed write is counted here and given up after three rounds. */
-    if (!native_picasso_gpu_diag_write) return;
-    static unsigned failures = 0;
-    if (failures >= 3) return;
+     * rewrites the snapshot file with the newest text each call.
+     *
+     * Round 11: every snapshot starts with the tag of the writer that produced
+     * it, so one boot's file alone shows which writer ran last -- the boot-time
+     * marker written in process context (ca-prefs), the cp-start probe in a
+     * kernel thread, or a report-thread round. Round 10's file never appeared
+     * and nothing recorded whether the thread ran at all, which is exactly the
+     * ambiguity this tag removes. The caller is told the writer's verdict so
+     * the same fact also reaches the USB console while it still lives. */
+    if (!native_picasso_gpu_diag_write) {
+        static bool reported = false;
+        if (!reported) {
+            reported = true;
+            printf("PICASSO_GPU_DIAG tag=%s err=-1 writer=absent\n", tag);
+        }
+        return -1;
+    }
     char text[512];
     const int length = snprintf(text, sizeof text,
-        "round=%u opens=%u foreign=%u name_reads=%u prop_reads=%u asker=%s stub=%u subs=%u/%u/%u/%u ext=%d/%d\n",
-        round, native_adreno_metal_opens(), native_adreno_metal_foreign_opens(),
+        "v11 tag=%s round=%u opens=%u foreign=%u name_reads=%u prop_reads=%u asker=%s stub=%u subs=%u/%u/%u/%u ext=%d/%d\n",
+        tag, round, native_adreno_metal_opens(), native_adreno_metal_foreign_opens(),
         native_adreno_metal_name_reads(), native_adreno_metal_property_reads(),
         native_adreno_metal_name_reader(), picasso_accelerator_stub_published() ? 1u : 0u,
         native_adreno_submit_ibs[0], native_adreno_submit_ibs[1],
         native_adreno_submit_ibs[2], native_adreno_submit_ibs[3],
         native_gpu_addon_stage, native_gpu_addon_status);
-    if (length <= 0) return;
-    if (native_picasso_gpu_diag_write(text, length) != 0) ++failures;
+    if (length <= 0) return -2;
+    const int written = length < (int)sizeof text ? length : (int)sizeof text - 1;
+    const int result = native_picasso_gpu_diag_write(text, written);
+    printf("PICASSO_GPU_DIAG tag=%s round=%u result=%d\n", tag, round, result);
+    return result;
 }
 
 void addonReport(void *, wait_result_t)
 {
+    /* Round 11: announce the thread before any sleep. The USB console dies
+     * ~91 s in and cp_start runs close to that edge, so a print after the
+     * first sleep may never be seen; this line and the tagged write below are
+     * what tell one boot apart from "the thread never ran". */
+    printf("PICASSO_GPU report: thread start writer=%d\n",
+        native_picasso_gpu_diag_write ? 1 : 0);
+    picasso_gpu_diag_write("thread-start", 0);
     IOSleep(20000);
     printf("PICASSO_GPU addon: extensions=%d/%x daemons=%d/%x wallpaper=%d/%x\n",
         native_gpu_addon_stage, native_gpu_addon_status,
@@ -2138,6 +2160,11 @@ void addonReport(void *, wait_result_t)
         native_adreno_cp_aperture[2], native_adreno_cp_aperture[3],
         native_adreno_cp_check[0], native_adreno_cp_check[1], native_adreno_cp_check[2],
         native_adreno_cp_check[3], native_adreno_cp_check[4], native_adreno_cp_check[5]);
+    /* Round 11: snapshot at ~20 s and ~60 s as well as at ~180 s. If the
+     * kernel-thread writer works, the file proves it long before the round-10
+     * first write at ~180 s, which is also the only moment its failure could
+     * have been observed. */
+    picasso_gpu_diag_write("t20", 0);
     IOSleep(40000);
     uint32_t selector = 0, status = 0;
     const uint32_t calls = native_adreno_metal_last(&selector, &status);
@@ -2160,6 +2187,7 @@ void addonReport(void *, wait_result_t)
     /* wf128: the first two samples land before the render server exists (backboardd opens the
      * accelerator after the dyld-cache phase). This third sample, three minutes in, shows
      * whether client submissions keep arriving instead of stopping after the first burst. */
+    picasso_gpu_diag_write("t60", 0);
     IOSleep(120000);
     printf("PICASSO_GPU submits final: submissions=%u ibs=%u max=%u many=%u\n",
         native_adreno_submit_ibs[0], native_adreno_submit_ibs[1],
@@ -2169,7 +2197,7 @@ void addonReport(void *, wait_result_t)
         native_adreno_metal_report(), native_adreno_metal_report2(),
         native_adreno_metal_name_reads(), native_adreno_metal_property_reads(),
         native_adreno_metal_name_reader(), picasso_accelerator_stub_published() ? 1u : 0u);
-    picasso_gpu_diag_write_file(0);
+    picasso_gpu_diag_write("t180", 0);
     /* wf133: the UI comes up minutes after the third sample (wf132 saw the lock screen with the
      * +180 s counter still at the five setup submissions), so keep reporting: whether the
      * compositor's later frames are GPU work shows up here as the counter growing. */
@@ -2190,7 +2218,7 @@ void addonReport(void *, wait_result_t)
                 printf("PICASSO_GPU stub fallback published=%u opens=%u\n",
                     fallback ? 1u : 0u, native_adreno_metal_opens());
             }
-            picasso_gpu_diag_write_file(round);
+            picasso_gpu_diag_write("live", round);
         }
         /* Write-combine maintenance cost, cumulative: the per-submission re-assertion walks every page of every write-combined
          * mapping (the fix for XNU resetting attributes on a view teardown), and the cache-maintenance passes. A submission's
@@ -2742,6 +2770,10 @@ extern "C" int native_adreno620_cp_start(void)
         printf("PICASSO_GPU cp: client test ok\n");
     }
 
+    /* Round 11: probe the snapshot channel from here, while the USB console is
+     * still alive (~91 s), so the writer's verdict reaches us in this boot
+     * instead of only as a missing file after it. */
+    picasso_gpu_diag_write("cp-start", 0);
     /* Report the boot addon's mount stages once launchd has run them. */
     uint32_t addonValue = 0;
     if (PE_parse_boot_argn("sheng-gpu-addon", &addonValue,
