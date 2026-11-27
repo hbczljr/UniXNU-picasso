@@ -1,6 +1,6 @@
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -2260,6 +2260,30 @@
+@@ -2260,6 +2260,36 @@
  	int i;
  	int itercount = 0;
  	proc_t p = vfs_context_proc(imgp->ip_vfs_context);
@@ -23,15 +23,21 @@
 +			printf("PICASSO_EXECN n=%u pid=%d name=%s\n", activations,
 +			    proc_pid(p), p->p_name);
 +		}
-+		if (native_owner_data_stage == 4 && activations % 8 == 0) {
++		/* Round 21: save on the first twelve activations too. Round 20 named them
++		 * on the console but only saved every eighth, so a boot that stopped at
++		 * activations 1..7 left no trace in the record at all -- which is exactly
++		 * the case left to distinguish. */
++		if (native_owner_data_stage == 4 &&
++		    (activations <= 12 || activations % 8 == 0)) {
 +			int saveResult = picasso_console_record_save("exec");
-+			if (activations == 8) printf("PICASSO_LOG exec-save result=%d\n", saveResult);
++			if (activations == 1 || activations == 8)
++				printf("PICASSO_LOG exec-save n=%u result=%d\n", activations, saveResult);
 +		}
 +	}
  
  	/*
  	 * For exec, the translock needs to be taken on old proc and not
-@@ -9384,7 +9408,98 @@
+@@ -9384,7 +9414,98 @@
 +	int native_picasso_gpu_diag_write(const char *text, int length);
 +	int native_picasso_gpu_diag_marker(const char *tag);
  	int mobile = mobile_dir ? mobile_dir : native_picasso_ca_pref_write(
